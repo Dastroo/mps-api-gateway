@@ -6,11 +6,14 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -pthread -Wall")
 set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -pthread")
 
-add_executable(${PROJECT_NAME} main.cpp src/APIGateway.cpp include/APIGateway.h src/Accounts.cpp)
+add_executable(${PROJECT_NAME} main.cpp
+        src/APIGateway.cpp include/APIGateway.h
+        src/Accounts.cpp include/Accounts.h
+        include/Account.h include/ResponseError.h)
 
 target_link_libraries(${PROJECT_NAME}
         log_helper
-        db-helper SQLiteCpp sqlite3
+        db_helper SQLiteCpp sqlite3
         jsoncpp
         cryptopp crypto ssl
         my_utils
