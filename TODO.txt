@@ -1,0 +1,9 @@
+// TODO: change all unbound variables to bound ones example: unsigned int to uint32_t, char* to std::string
+// TODO: secure authentication from newbie tasks farming
+// TODO: secure authentication from using multiple devices to farm app (using crypto_address transaction exploration)
+// TODO: secure authentication from vpn (checking ip's, country, timestamp difference)
+// TODO: check wtf a Rest server is and if this server needs one
+// TODO: block rooted devices
+// TODO: implement VPN & PROXY detection service API https://vpnapi.io/pricing, https://iphub.info/pricing, https://vpn-proxy-detection.ipify.org/signup
+// TODO: delete all expired devices
+// TODO: change from blocking httpserver lib to a non-blocking one if necessary

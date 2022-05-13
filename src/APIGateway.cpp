@@ -4,6 +4,7 @@
 
 #define CPPHTTPLIB_OPENSSL_SUPPORT
 
+#include <iostream>
 #include <httplib.h>
 #include <log_helper/Log.h>
 #include <mps_utils/SvrDir.h>
@@ -13,15 +14,15 @@
 #include <jsoncpp/json/writer.h>
 #include <jsoncpp/json/reader.h>
 
-#include "../include/ResponseError.h"
-#include "../include/Accounts.h"
-#include "../include/Account.h"
 #include "../include/APIGateway.h"
+#include "include/UserAuthAPI.h"
 
 void APIGateway::run() {
+#ifdef BUILD_DEBUG
+    Log::init();
+#else
     Log::init(mps::SvrDir::var().append("logs/api-gateway/log"));
-    DBHelper::set_default_path(mps::SvrDir::var().append("database.db3"));
-    Log::i(TAG, DBHelper().get_db_full_path());
+#endif
 
     std::string cert_dir = mps::SvrDir::usr();
     std::string cert_path = cert_dir + "root_ca.pem";
@@ -32,10 +33,16 @@ void APIGateway::run() {
         throw std::invalid_argument("wrong or nonexistent certs were given\n" + cert_path + "\n" + cert_key_path);
     }
 
-    Accounts accounts;
-    mps::NotificationsAPI notificationsAPI;
+    //  READ PARAMETERS FROM JSON FILE
+    Json::Value value;
+    std::ifstream is(mps::SvrDir::usr().append("config.json"));
+    Json::Reader().parse(is, value, false);
+    std::string ip = value["ip"].asString();
+    Log::i(TAG, "run", "ip: " + ip);
 
-    api.Post("/sign_in", [&](const httplib::Request &req, httplib::Response &res) {
+    const UserAuthAPI authAPI(value, value["iphub_api_key"].asString(), value["enc_dec_key"].asString());
+
+    api.Post("/sign_in", [&authAPI](const httplib::Request &req, httplib::Response &res) {
         Log::i(TAG, req.path, req.body);
 
         //  PARSE JSON
@@ -46,28 +53,92 @@ void APIGateway::run() {
 
         //  COLLECT REQUEST DATA
         std::string android_id = value["android_id"].asString();
-        Account account(android_id, req.remote_addr);
+        std::string pseudo_id = value["pseudo_id"].asString();
+        std::string hash = value["hash"].asString();
+        std::string ip = req.remote_addr;
+
+        if (!authAPI.verify(res, req.path, hash, android_id, pseudo_id))
+            return;
+
+        authAPI.sign_in(res, android_id, pseudo_id, ip);
+    });
+
+    api.Post("/login", [&authAPI](const httplib::Request &req, httplib::Response &res) {
+        Log::i(TAG, req.path, req.body);
+
+        //  PARSE JSON
+        Json::Value value;
+        Json::Reader reader;
+        if (!reader.parse(req.body, value, false))
+            Log::e(TAG, req.path, reader.getFormattedErrorMessages());
+
+        //  COLLECT REQUEST DATA
+        uint64_t id = value["id"].asUInt64();
+        std::string token = value["token"].asString();
+        std::string hash = value["hash"].asString();
+        std::string ip = req.remote_addr;
+
+        if (!authAPI.verify(res, req.path, ip, hash, id, token) ||
+            !authAPI.authenticate(id, token, UserAuthAPI::FAUCET))
+            return;
+
+        authAPI.login(res, id, token, ip);
+    });
+
+    api.Post("/upgrade", [&authAPI](const httplib::Request &req, httplib::Response &res) {
+        Log::i(TAG, req.path, req.body);
+
+        //  PARSE JSON
+        Json::Value value;
+        Json::Reader reader;
+        if (!reader.parse(req.body, value, false))
+            Log::e(TAG, req.path, reader.getFormattedErrorMessages());
+
+        //  COLLECT REQUEST DATA
+        uint64_t id = value["id"].asUInt64();
+        std::string token = value["token"].asString();
+        std::string hash = value["hash"].asString();
+        std::string ip = req.remote_addr;
+
+        if (!authAPI.verify(res, req.path, ip, hash, id, token) ||
+            !authAPI.authenticate(id, token, UserAuthAPI::FAUCET))
+            return;
+
+        authAPI.upgrade();
+    });
+
+    /*api.Post("/sign_in", [&](const httplib::Request &req, httplib::Response &res) {
+        Log::i(TAG, req.path, req.body);
+
+        //  PARSE JSON
+        Json::Value value;
+        Json::Reader reader;
+        if (!reader.parse(req.body, value, false))
+            Log::e(TAG, req.path, reader.getFormattedErrorMessages());
+
+        //  COLLECT REQUEST DATA
+        std::string android_id = value["android_id"].asString();
+//        user user(android_id, req.remote_addr);
 
         //  CREATE ACCOUNT
         Json::Value jor;
-        error sign_err = accounts.sign_in(account);
-        if (sign_err == SUCCESS) {
-            jor["error"] = false; // false means no error
-            jor["id"] = account.id;
-        } else if (sign_err == REGISTERED) {
-            jor["error"] = true; // true means error
-            jor["error_code"] = sign_err;
-            jor["id"] = account.id;
-        } else {
-            jor["error"] = true; // true means error
-            jor["error_code"] = sign_err;
-        }
+//        error sign_err = accounts.sign_in(account);
+//        if (sign_err == SUCCESS) {
+        jor["error"] = false; // false means no error
+//            jor["id"] = (Json::UInt64) account.id();
+//        } else if (sign_err == REGISTERED) {
+        jor["error"] = true; // true means error
+//            jor["error_code"] = sign_err;
+//        } else {
+        jor["error"] = true; // true means error
+//            jor["error_code"] = sign_err;
+//        }
 
         std::string response = Json::FastWriter().write(jor);
         res.set_content(response, "application/json");
         response.pop_back(); // to prevent newline char
         Log::i(TAG, req.path, response);
-    });
+    });*/
 
     api.Post("/login", [&](const httplib::Request &req, httplib::Response &res) {
         Log::i(TAG, req.path, req.body);
@@ -79,20 +150,20 @@ void APIGateway::run() {
             Log::e(TAG, req.path, reader.getFormattedErrorMessages());
 
         //  COLLECT REQUEST DATA
-        int id = value["id"].asInt();
+//        int id = value["id"].asInt();
         std::string android_id = value["android_id"].asString();
-        Account account(android_id, id, req.remote_addr);
+//        user account(android_id, id, req.remote_addr);
 
         Json::Value jor;
-        error login_err = accounts.login(account);
-        if (login_err == SUCCESS) {
-            jor["error"] = false; // false means no error
-            jor["token"] = account.token;
-            jor["expiration_date"] = account.expiration_date;
-        } else {
-            jor["error"] = true; // true means error
-            jor["error_code"] = login_err;
-        }
+//        error login_err = accounts.login(account);
+//        if (login_err == SUCCESS) {
+        jor["error"] = false; // false means no error
+//            jor["token"] = account.token;
+//            jor["expiration_date"] = account.expiration_date;
+//        } else {
+        jor["error"] = true; // true means error
+//            jor["error_code"] = login_err;
+//        }
 
         std::string response = Json::FastWriter().write(jor);
         res.set_content(response, "application/json");
@@ -110,20 +181,20 @@ void APIGateway::run() {
             Log::e(TAG, req.path, reader.getFormattedErrorMessages());
 
         //  COLLECT REQUEST DATA
-        int id = value["id"].asInt();
+//        int id = value["id"].asInt();
         std::string token = value["token"].asString();
-        Account account(id, token, req.remote_addr);
+//        user account(id, token, req.remote_addr);
 
         Json::Value jor;
-        error auth_err = accounts.authenticate(account);
-        if (auth_err == SUCCESS) {
-            notificationsAPI.services_off(account.id);
-            accounts.sign_out(account);
-            jor["error"] = false; // false means no error
-        } else {
-            jor["error"] = true; // true means error
-            jor["error_code"] = auth_err;
-        }
+//        error auth_err = accounts.authenticate(account);
+//        if (auth_err == SUCCESS) {
+//            notificationsAPI.services_off(account.id);
+//            accounts.sign_out(account);
+        jor["error"] = false; // false means no error
+//        } else {
+        jor["error"] = true; // true means error
+//            jor["error_code"] = auth_err;
+//        }
 
         std::string response = Json::FastWriter().write(jor);
         res.set_content(response, "application/json");
@@ -142,19 +213,19 @@ void APIGateway::run() {
             Log::e(TAG, req.path, reader.getFormattedErrorMessages());
 
         //  COLLECT REQUEST DATA
-        int id = value["id"].asInt();
+//        int id = value["id"].asInt();
         std::string token = value["token"].asString();
-        Account account(id, token, req.remote_addr);
+//        user account(id, token, req.remote_addr);
 
         Json::Value jor;
-        error auth_err = accounts.authenticate(account);
-        if (auth_err == SUCCESS) {
-            accounts.logout(account);
-            jor["error"] = false; // false means no error
-        } else {
-            jor["error"] = true; // true means error
-            jor["error_code"] = auth_err;
-        }
+//        error auth_err = accounts.authenticate(account);
+//        if (auth_err == SUCCESS) {
+//            accounts.logout(account);
+        jor["error"] = false; // false means no error
+//        } else {
+        jor["error"] = true; // true means error
+//            jor["error_code"] = auth_err;
+//        }
 
         std::string response = Json::FastWriter().write(jor);
         res.set_content(response, "application/json");
@@ -173,21 +244,21 @@ void APIGateway::run() {
             Log::e(TAG, req.path, reader.getFormattedErrorMessages());
 
         //  COLLECT REQUEST DATA
-        int id = value["id"].asInt();
+//        int id = value["id"].asInt();
         std::string token = value["token"].asString();
-        Account account(id, token, req.remote_addr);
+//        user account(id, token, req.remote_addr);
 
         //  UPDATE TOKEN ON AUTHENTICATION SUCCESS
         Json::Value jor;
-        error auth_err = accounts.authenticate(account);
-        if (auth_err == SUCCESS) {
-            std::string firebase_token = value["firebase_token"].asString();
-            notificationsAPI.update_firebase_token(account.id, firebase_token);
-            jor["error"] = false; // false means no error
-        } else {
-            jor["error"] = true; // true means error
-            jor["error_code"] = auth_err;
-        }
+//        error auth_err = accounts.authenticate(account);
+//        if (auth_err == SUCCESS) {
+        std::string firebase_token = value["firebase_token"].asString();
+//            notificationsAPI.update_firebase_token(account.id, firebase_token);
+        jor["error"] = false; // false means no error
+//        } else {
+        jor["error"] = true; // true means error
+//            jor["error_code"] = auth_err;
+//        }
 
         std::string response = Json::FastWriter().write(jor);
         res.set_content(response, "application/json");
@@ -205,21 +276,21 @@ void APIGateway::run() {
             Log::e(TAG, req.path, reader.getFormattedErrorMessages());
 
         //  COLLECT REQUEST DATA
-        int id = value["id"].asInt();
+//        int id = value["id"].asInt();
         std::string token = value["token"].asString();
-        Account account(id, token, req.remote_addr);
+//        user account(id, token, req.remote_addr);
 
         //  FETCH SERVICES ON AUTHENTICATION SUCCESS
         Json::Value jor;
-        error auth_err = accounts.authenticate(account);
-        if (auth_err == SUCCESS) {
-            if (!reader.parse(notificationsAPI.services(account.id), jor["services"], false))
-                Log::e(TAG, req.path, reader.getFormattedErrorMessages());
-            jor["error"] = false; // false means no error
-        } else {
-            jor["error"] = true; // true means error
-            jor["error_code"] = auth_err;
-        }
+//        error auth_err = accounts.authenticate(account);
+//        if (auth_err == SUCCESS) {
+//            if (!reader.parse(notificationsAPI.services(account.id), jor["services"], false))
+//                Log::e(TAG, req.path, reader.getFormattedErrorMessages());
+        jor["error"] = false; // false means no error
+//        } else {
+        jor["error"] = true; // true means error
+//            jor["error_code"] = auth_err;
+//        }
 
         std::string response = Json::FastWriter().write(jor);
         res.set_content(response, "application/json");
@@ -237,22 +308,22 @@ void APIGateway::run() {
             Log::e(TAG, req.path, reader.getFormattedErrorMessages());
 
         //  COLLECT REQUEST DATA
-        int id = value["id"].asInt();
+//        int id = value["id"].asInt();
         std::string token = value["token"].asString();
-        Account account(id, token, req.remote_addr);
+//        user account(id, token, req.remote_addr);
 
         //  ADD ACCOUNT TO SERVICE ON AUTHENTICATION SUCCESS
         Json::Value jor;
-        error auth_err = accounts.authenticate(account);
-        if (auth_err == SUCCESS) {
-            std::string service = value["service"].asString();
-            std::string firebase_token = value["firebase_token"].asString();
-            notificationsAPI.service_on(service, account.id, firebase_token);
-            jor["error"] = false;
-        } else {
-            jor["error"] = true; // true means error
-            jor["error_code"] = auth_err;
-        }
+//        error auth_err = accounts.authenticate(account);
+//        if (auth_err == SUCCESS) {
+        std::string service = value["service"].asString();
+        std::string firebase_token = value["firebase_token"].asString();
+//            notificationsAPI.service_on(service, account.id, firebase_token);
+        jor["error"] = false;
+//        } else {
+        jor["error"] = true; // true means error
+//            jor["error_code"] = auth_err;
+//        }
 
         std::string response = (Json::FastWriter()).write(jor);
         res.set_content(response, "application/json");
@@ -270,21 +341,21 @@ void APIGateway::run() {
             Log::e(TAG, req.path, reader.getFormattedErrorMessages());
 
         //  COLLECT REQUEST DATA
-        int id = value["id"].asInt();
+//        int id = value["id"].asInt();
         std::string token = value["token"].asString();
-        Account account(id, token, req.remote_addr);
+//        user account(id, token, req.remote_addr);
 
         //  REMOVE ACCOUNT FROM SERVICE ON AUTHENTICATION SUCCESS
         Json::Value jor;
-        error auth_err = accounts.authenticate(account);
-        if (auth_err == SUCCESS) {
-            std::string service = value["service"].asString();
-            notificationsAPI.service_off(service, account.id);
-            jor["error"] = false; // false means no error
-        } else {
-            jor["error"] = true; // true means error
-            jor["error_code"] = auth_err;
-        }
+//        error auth_err = accounts.authenticate(account);
+//        if (auth_err == SUCCESS) {
+        std::string service = value["service"].asString();
+//            notificationsAPI.service_off(service, account.id);
+        jor["error"] = false; // false means no error
+//        } else {
+        jor["error"] = true; // true means error
+//            jor["error_code"] = auth_err;
+//        }
 
         std::string response = (Json::FastWriter()).write(jor);
         res.set_content(response, "application/json");
@@ -304,13 +375,6 @@ void APIGateway::run() {
 
         exit(signum);
     });
-
-    //  READ IP FROM JSON FILE
-    Json::Value value;
-    std::ifstream is(mps::SvrDir::usr().append("config.json"));
-    Json::Reader().parse(is, value, false);
-    std::string ip = value["ip"].asString();
-    Log::i(TAG, "run", "ip: " + ip);
 
     api.listen(ip.c_str(), 1618);
 }
