@@ -10,9 +10,19 @@
 #include <mps_utils/SvrDir.h>
 #include <mps_utils/NotificationsAPI.h>
 
+#include <my_utils/Time.h>
+
+#ifdef REDHAT
+
+#include <json/value.h>
+#include <json/writer.h>
+#include <json/reader.h>
+
+#elifdef DEBIAN
 #include <jsoncpp/json/value.h>
 #include <jsoncpp/json/writer.h>
 #include <jsoncpp/json/reader.h>
+#endif
 
 #include "../include/APIGateway.h"
 #include "include/UserAuthAPI.h"
@@ -52,10 +62,10 @@ void APIGateway::run() {
             Log::e(TAG, req.path, reader.getFormattedErrorMessages());
 
         //  COLLECT REQUEST DATA
-        std::string android_id = value["android_id"].asString();
-        std::string pseudo_id = value["pseudo_id"].asString();
-        std::string hash = value["hash"].asString();
-        std::string ip = req.remote_addr;
+        std::string android_id  = value["android_id"].asString();
+        std::string pseudo_id   = value["pseudo_id"].asString();
+        std::string hash        = value["hash"].asString();
+        std::string ip          = req.remote_addr;
 
         if (!authAPI.verify(res, req.path, hash, android_id, pseudo_id))
             return;
@@ -73,16 +83,17 @@ void APIGateway::run() {
             Log::e(TAG, req.path, reader.getFormattedErrorMessages());
 
         //  COLLECT REQUEST DATA
-        uint64_t id = value["id"].asUInt64();
-        std::string token = value["token"].asString();
-        std::string hash = value["hash"].asString();
-        std::string ip = req.remote_addr;
+        uint64_t id         = value["id"].asUInt64();
+        std::string token   = value["token"].asString();
+        std::string hash    = value["hash"].asString();
+        std::string ip      = req.remote_addr;
+        uint64_t timestamp  = mutl::time::now<mutl::time::seconds>();
 
         if (!authAPI.verify(res, req.path, ip, hash, id, token) ||
-            !authAPI.authenticate(id, token, UserAuthAPI::FAUCET))
+            !authAPI.authenticate(id, timestamp, token, UserAuthAPI::FAUCET))
             return;
 
-        authAPI.login(res, id, token, ip);
+        authAPI.login(res, timestamp, id, token, ip);
     });
 
     api.Post("/upgrade", [&authAPI](const httplib::Request &req, httplib::Response &res) {
@@ -95,16 +106,18 @@ void APIGateway::run() {
             Log::e(TAG, req.path, reader.getFormattedErrorMessages());
 
         //  COLLECT REQUEST DATA
-        uint64_t id = value["id"].asUInt64();
-        std::string token = value["token"].asString();
-        std::string hash = value["hash"].asString();
-        std::string ip = req.remote_addr;
+        uint64_t    id      = value["id"].asUInt64();
+        std::string token   = value["token"].asString();
+        std::string hash    = value["hash"].asString();
+        std::string ip      = req.remote_addr;
+        uint64_t timestamp  = mutl::time::now<mutl::time::sec>();
 
         if (!authAPI.verify(res, req.path, ip, hash, id, token) ||
-            !authAPI.authenticate(id, token, UserAuthAPI::FAUCET))
+            !authAPI.authenticate(timestamp, id, token, UserAuthAPI::FAUCET))
             return;
 
-        authAPI.upgrade();
+        //  TODO: upgrade system
+        authAPI.upgrade(res, timestamp, ip);
     });
 
     /*api.Post("/sign_in", [&](const httplib::Request &req, httplib::Response &res) {

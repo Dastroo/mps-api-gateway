@@ -102,10 +102,10 @@ public:
     crypto_address() const { return crypto_address_; }
 
     const std::string &
-    email() { return email_; }
+    email() const { return email_; }
 
     const std::string &
-    tel_nr() { return tel_nr_; }
+    tel_nr() const { return tel_nr_; }
 
     const std::string &
     iv() const { return iv_; }
@@ -120,7 +120,7 @@ public:
     suspicious() const { return suspicious_; }
 
     unsigned long
-    ban_expires() { return ban_expires_; }
+    ban_expires() const { return ban_expires_; }
 
     void
     type(unsigned char type) { type_ = type; }

@@ -66,3 +66,9 @@ if (UNIX AND NOT APPLE)
             COMMENT "Uninstall files with install_manifest.txt"
             COMMAND xargs rm -vf < install_manifest.txt || echo Nothing in install_manifest.txt to be uninstalled!)
 endif ()
+
+if (EXISTS /etc/redhat-release)
+    add_definitions(-DREDHAT)
+elseif (EXISTS /etc/debian_version)
+    add_definitions(-DDEBIAN)
+endif ()

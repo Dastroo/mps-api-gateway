@@ -2,7 +2,6 @@
 // Created by dawid on 03.04.2022.
 //
 
-#include <chrono>
 #include <fstream>
 #include <utility>
 
@@ -13,9 +12,18 @@
 #include <cryptopp/aes.h>
 #include <cryptopp/osrng.h>
 
+#ifdef REDHAT
+
+#include <json/value.h>
+#include <json/reader.h>
+#include <json/writer.h>
+
+#endif
+#ifdef DEBIAN
 #include <jsoncpp/json/value.h>
 #include <jsoncpp/json/reader.h>
 #include <jsoncpp/json/writer.h>
+#endif
 
 #include <odb/pgsql/database.hxx>
 #include <odb/database.hxx>
@@ -24,6 +32,7 @@
 #include <mps_utils/SvrDir.h>
 
 #include <log_helper/Log.h>
+#include <my_utils/Time.h>
 
 #include "user.h"
 #include "user_odb.h"
@@ -57,9 +66,46 @@ UserAuthAPI::UserAuthAPI(const Json::Value &params,
     db = std::unique_ptr<odb::database>(new odb::pgsql::database(argc, argv));
 }
 
-bool UserAuthAPI::authenticate(uint32_t id, const std::string &token, user_type type) const {
+bool UserAuthAPI::authenticate(httplib::Response &res,
+                               const std::string &path,
+                               uint64_t timestamp,
+                               uint32_t id,
+                               const std::string &token,
+                               const std::string &ip_address,
+                               user_type type) const {
     typedef odb::query<user> query;
-    return (bool) db->query_one<user>(query::id == id && query::token == token && query::type >= type);
+
+    auto u = db->query_one<user>(query::id == id && query::token == token);
+    if (!u) {
+        Json::Value contents;
+        contents["error"] = NOT_REGISTERED;
+        contents["timestamp"] = (Json::UInt64) timestamp;
+        respond(res, contents, path);
+        return false;
+    } else if (u->type() < type) {
+        Json::Value contents;
+        contents["error"] = ACCOUNT_TYPE;
+        contents["timestamp"] = (Json::UInt64) timestamp;
+        respond(res, contents, path);
+        return false;
+    } else if (banned_u(*u, timestamp)) {
+        Json::Value contents;
+        contents["error"] = BANNED;
+        contents["timestamp"] = (Json::UInt64) u->ban_expires();
+        respond(res, contents, path);
+        return false;
+    }
+
+    auto i(db->query_one<ip>(odb::query<ip>::address == ip_address));
+    if (banned_i(*i, timestamp)) {
+        Json::Value contents;
+        contents["error"] = BANNED;
+        contents["timestamp"] = (Json::UInt64) u->ban_expires();
+        respond(res, contents, path);
+        return false;
+    }
+
+    return true;
 }
 
 void
@@ -69,7 +115,7 @@ UserAuthAPI::sign_in(httplib::Response &res,
                      const std::string &ip_address) const {
 
     const std::string path = "/sign_in";
-    uint64_t timestamp = seconds_science_epoch();
+    uint64_t timestamp = mutl::time::now<mutl::time::sec>();
 
     //  CHECK IF DEVICE IS BANNED
     auto d(db->query_one<device>(odb::query<device>::android_id == android_id));
@@ -127,22 +173,14 @@ UserAuthAPI::sign_in(httplib::Response &res,
 
 void
 UserAuthAPI::login(httplib::Response &res,
+                   uint64_t timestamp,
                    uint32_t id,
                    const std::string &token,
                    const std::string &ip_address) const {
     typedef odb::query<user> query;
-
     const std::string path = "/login";
-    uint64_t timestamp = seconds_science_epoch();
 
-    auto u(db->query_one<user>(query::id == id && query::token == token));
-    if (!u) {
-        Json::Value content;
-        content["error"] = NOT_REGISTERED;
-        content["timestamp"] = (Json::UInt64) timestamp;
-        respond(res, content, path);
-        return;
-    }
+    auto u(db->query_one<user>(query::id == id));
 
     u->token(guid());
     u->token_expires(timestamp + token_lifetime_s);
@@ -159,20 +197,20 @@ UserAuthAPI::login(httplib::Response &res,
 }
 
 void UserAuthAPI::upgrade(httplib::Response &res,
+                          uint64_t timestamp,
                           const std::string &ip_address) const {
     const std::string path = "/login";
-    uint64_t timestamp = seconds_science_epoch();
 
     std::string country = get_country_iso_code(ip_address);
     if (country == "US" || country == "FR" || country == "UK" ||
         country == "JP" || country == "DE" || country == "IT" ||
         country == "CA") {
         if (!check_ip(ip_address, timestamp, country)) {
-            // TODO: warn user that he needs to disable vpn
+            //  TODO: process the warning in app
             Json::Value content;
             content["error"] = SUCCESS;
             content["timestamp"] = (Json::UInt64) timestamp;
-            content["warning"] = "";
+            content["warning"] = vpn_warn;
             respond(res, content, path);
         }
     }
@@ -211,9 +249,9 @@ void UserAuthAPI::respond(httplib::Response &res, const Json::Value &content, co
     Log::i(TAG, endpoint, response);
 }
 
-std::string UserAuthAPI::get_country_iso_code(const std::string &ip) const {
+std::string UserAuthAPI::get_country_iso_code(const std::string &ip_address) const {
     typedef odb::query<ip_to_location> query;
-    uint64_t ip_int = Ip::toInt(ip);
+    uint64_t ip_int = Ip::toInt(ip_address);
     auto i(db->query_one<ip_to_location>(query::from < ip_int && query::to > ip_int));
     std::string iso_code = i->iso_code();
     return iso_code.empty() ? "US" : iso_code;
@@ -237,35 +275,72 @@ void UserAuthAPI::ban_device(const std::string &android_id, uint64_t timestamp, 
     t.commit();
 }
 
-void UserAuthAPI::ban_ip(const std::string &ip_address, uint64_t timestamp, uint64_t for_how_long) const {
+uint64_t UserAuthAPI::ban_ip(const std::string &ip_address, uint64_t timestamp, uint64_t for_how_long) const {
     auto i(db->query_one<ip>(odb::query<ip>::address == ip_address && odb::query<ip>::client_id == 0));
 
     odb::transaction t(db->begin());
-
+    uint64_t ban_ends = timestamp + for_how_long;
     if (i) {
-        i->ban_expires(timestamp + for_how_long);
+        i->ban_expires(ban_ends);
         db->update(i);
     } else {
-        i.reset(new ip(0, ip_address, "", timestamp, timestamp + for_how_long));
+        i.reset(new ip(0, ip_address, "", timestamp, ban_ends));
         db->persist(i);
     }
 
     t.commit();
+
+    return ban_ends;
 }
 
 void UserAuthAPI::ban_user(uint64_t id, uint64_t timestamp, uint64_t for_how_long) const {
-    auto i(db->query_one<user>(odb::query<user>::id == id));
-    if (i) {
+    auto u(db->query_one<user>(odb::query<user>::id == id));
+    if (u) {
         odb::transaction t(db->begin());
-        i->ban_expires(timestamp + for_how_long);
-        db->update(i);
+        u->ban_expires(timestamp + for_how_long);
+        db->update(u);
         t.commit();
     }
 }
 
-uint64_t UserAuthAPI::seconds_science_epoch() {
-    return std::chrono::duration_cast<std::chrono::seconds>(
-            std::chrono::system_clock::now().time_since_epoch()).count();
+bool UserAuthAPI::banned_d(const std::string &android_id, uint64_t timestamp) const {
+    typedef odb::query<device> query;
+    auto d(db->query_one<device>(query::android_id == android_id));
+    if (d)
+        // 1 means permanently banned
+        return d->expires() == 1 || d->expires() >= timestamp;
+
+    return false;
+}
+
+bool UserAuthAPI::banned_i(const std::string &ip_address, uint64_t timestamp) const {
+    typedef odb::query<ip> query;
+    auto i(db->query_one<ip>(query::address == ip_address));
+    if (i)
+        // 1 means permanently banned
+        return i->ban_expires() == 1 || i->ban_expires() >= timestamp;
+
+    return false;
+}
+
+bool UserAuthAPI::banned_i(const ip &i, uint64_t timestamp) const {
+    // 1 means permanently banned
+    return i.ban_expires() == 1 || i.ban_expires() >= timestamp;
+}
+
+bool UserAuthAPI::banned_u(uint64_t id, uint64_t timestamp) const {
+    typedef odb::query<user> query;
+    auto u(db->query_one<user>(query::id == id));
+    if (u)
+        // 1 means permanently banned
+        return u->ban_expires() == 1 || u->ban_expires() >= timestamp;
+
+    return false;
+}
+
+bool UserAuthAPI::banned_u(const user &u, uint64_t timestamp) const {
+    // 1 means permanently banned
+    return u.ban_expires() == 1 || u.ban_expires() >= timestamp;
 }
 
 std::string UserAuthAPI::guid() {
@@ -296,6 +371,7 @@ std::string UserAuthAPI::sha256Hash(const std::string &aString) {
     return digest;
 }
 
+/// encrypt string and generate random iv (remember to save the iv_out somewhere)
 std::string UserAuthAPI::encrypt(const std::string &s, std::string &iv_out) const {
     using namespace CryptoPP;
 

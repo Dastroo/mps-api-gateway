@@ -49,39 +49,44 @@ public:
     template<typename ...Args>
     inline bool verify(httplib::Response &res,
                        const std::string &path,
-                       const std::string &ip,
+                       const std::string &ip_address,
                        const std::string &hash,
                        Args...args) const {
-        if (sha256Hash(mutl::concatenate(args...)) != hash) {
-            uint64_t timestamp = seconds_science_epoch();
-            ban_ip(ip, timestamp, api_exploit_ban);
+        if (sha256Hash(mutl::concatenate(args...)) == hash)
+            return true;
 
-            Json::Value contents;
-            contents["error"] = BANNED;
-            contents["timestamp"] = (Json::UInt64) timestamp + api_exploit_ban;
-            respond(res, contents, path);
-            return false;
-        }
+        uint64_t timestamp = mutl::time::now<mutl::time::sec>();
+        uint64_t ban_ends = ban_ip(ip_address, timestamp, api_exploit_ban);
 
-        return true;
+        Json::Value contents;
+        contents["error"] = BANNED;
+        contents["timestamp"] = (Json::UInt64) ban_ends;
+        respond(res, contents, path);
+        return false;
     }
 
     [[nodiscard]]
-    bool authenticate(uint32_t id,
+    bool authenticate(httplib::Response &res,
+                      const std::string &path,
+                      uint64_t timestamp,
+                      uint32_t id,
                       const std::string &token,
+                      const std::string &ip_address,
                       user_type type) const;
 
     void sign_in(httplib::Response &res,
                  const std::string &android_id,
                  const std::string &pseudo_id,
-                 const std::string &ip) const;
+                 const std::string &ip_address) const;
 
     void login(httplib::Response &res,
+               uint64_t timestamp,
                uint32_t id,
                const std::string &token,
                const std::string &ip_address) const;
 
     void upgrade(httplib::Response &res,
+                 uint64_t timestamp,
                  const std::string &ip_address) const;
 
 private:
@@ -92,20 +97,33 @@ private:
 
     void ban_device(const std::string &android_id, uint64_t timestamp, uint64_t for_how_long) const;
 
-    void ban_ip(const std::string &ip_address, uint64_t timestamp, uint64_t for_how_long) const;
+    [[nodiscard]] uint64_t ban_ip(const std::string &ip_address, uint64_t timestamp, uint64_t for_how_long) const;
 
     void ban_user(uint64_t id, uint64_t timestamp, uint64_t for_how_long) const;
 
     [[nodiscard]]
-    std::string get_country_iso_code(const std::string &ip) const;
+    bool banned_d(const std::string &android_id, uint64_t timestamp) const;
 
-    static unsigned long seconds_science_epoch();
+    [[nodiscard]]
+    bool banned_i(const std::string &ip_address, uint64_t timestamp) const;
+
+    [[nodiscard]]
+    bool banned_i(const ip &i, uint64_t timestamp) const;
+
+    [[nodiscard]]
+    bool banned_u(uint64_t id, uint64_t timestamp) const;
+
+    [[nodiscard]]
+    bool banned_u(const user &u, uint64_t timestamp) const;
+
+    [[nodiscard]]
+    std::string get_country_iso_code(const std::string &ip_address) const;
 
     static std::string guid();
 
     static std::string sha256Hash(const std::string &s);
 
-    std::string encrypt(const std::string &s, std::string &iv_out) const;
+    [[nodiscard]] std::string encrypt(const std::string &s, std::string &iv_out) const;
 
-    std::string decrypt(const std::string &cipher, const std::string &iv_str) const;
+    [[nodiscard]] std::string decrypt(const std::string &cipher, const std::string &iv_str) const;
 };
