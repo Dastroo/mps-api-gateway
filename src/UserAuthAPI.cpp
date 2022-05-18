@@ -72,7 +72,7 @@ bool UserAuthAPI::authenticate(httplib::Response &res,
                                uint32_t id,
                                const std::string &token,
                                const std::string &ip_address,
-                               user_type type) const {
+                               flags type) const {
     typedef odb::query<user> query;
 
     auto u = db->query_one<user>(query::id == id && query::token == token);
@@ -114,7 +114,7 @@ UserAuthAPI::sign_in(httplib::Response &res,
                      const std::string &pseudo_id,
                      const std::string &ip_address) const {
 
-    const std::string path = "/sign_in";
+    const std::string &path = "/sign_in";
     uint64_t timestamp = mutl::time::now<mutl::time::sec>();
 
     //  CHECK IF DEVICE IS BANNED
@@ -150,7 +150,7 @@ UserAuthAPI::sign_in(httplib::Response &res,
     //  GET IP ISO CODE
     std::string country = get_country_iso_code(ip_address);
 
-    user u(timestamp, FAUCET, pseudo_id, guid(), timestamp + token_lifetime_s);
+    user u(timestamp, FAUCET, pseudo_id, crypto::UUID(), timestamp + token_lifetime_s);
     d.reset(new device(android_id, timestamp + device_registration_cooldown));
 
     odb::transaction t;
@@ -178,11 +178,11 @@ UserAuthAPI::login(httplib::Response &res,
                    const std::string &token,
                    const std::string &ip_address) const {
     typedef odb::query<user> query;
-    const std::string path = "/login";
+    const std::string &path = "/login";
 
     auto u(db->query_one<user>(query::id == id));
 
-    u->token(guid());
+    u->token(crypto::UUID());
     u->token_expires(timestamp + token_lifetime_s);
     odb::transaction t(db->begin());
     db->update(u);
@@ -196,10 +196,10 @@ UserAuthAPI::login(httplib::Response &res,
     respond(res, content, path);
 }
 
-void UserAuthAPI::upgrade(httplib::Response &res,
+/*void UserAuthAPI::upgrade(httplib::Response &res,
                           uint64_t timestamp,
                           const std::string &ip_address) const {
-    const std::string path = "/login";
+    const std::string &path = "/upgrade";
 
     std::string country = get_country_iso_code(ip_address);
     if (country == "US" || country == "FR" || country == "UK" ||
@@ -214,7 +214,7 @@ void UserAuthAPI::upgrade(httplib::Response &res,
             respond(res, content, path);
         }
     }
-}
+}*/
 
 /// @return 1(true) if ip belongs to vpn provider
 bool UserAuthAPI::check_ip(const std::string &ip_address, uint64_t timestamp, std::string &country) const {
@@ -341,80 +341,4 @@ bool UserAuthAPI::banned_u(uint64_t id, uint64_t timestamp) const {
 bool UserAuthAPI::banned_u(const user &u, uint64_t timestamp) const {
     // 1 means permanently banned
     return u.ban_expires() == 1 || u.ban_expires() >= timestamp;
-}
-
-std::string UserAuthAPI::guid() {
-    using namespace std::chrono;
-    static std::mutex mutex;
-    std::lock_guard<std::mutex> lock(mutex);
-
-    unsigned long long now = duration_cast<nanoseconds>(
-            system_clock::now().time_since_epoch()).count();
-
-    std::string uid = sha256Hash(std::to_string(now));
-
-    return uid;
-}
-
-std::string UserAuthAPI::sha256Hash(const std::string &aString) {
-    std::string digest;
-    CryptoPP::SHA256 hash;
-
-    CryptoPP::StringSource foo(
-            aString,
-            true,
-            new CryptoPP::HashFilter(
-                    hash,
-                    new CryptoPP::Base64Encoder(
-                            new CryptoPP::StringSink(digest))));
-    digest.pop_back();
-    return digest;
-}
-
-/// encrypt string and generate random iv (remember to save the iv_out somewhere)
-std::string UserAuthAPI::encrypt(const std::string &s, std::string &iv_out) const {
-    using namespace CryptoPP;
-
-    AutoSeededRandomPool prng;
-
-    SecByteBlock key(AES::DEFAULT_KEYLENGTH);
-    SecByteBlock iv(AES::BLOCKSIZE);
-
-    key.Assign((unsigned char *) enc_dec_key.c_str(), enc_dec_key.size());
-    prng.GenerateBlock(iv, iv.size());
-
-    iv_out = std::string(iv.begin(), iv.end());
-
-    EAX<AES>::Encryption e;
-    e.SetKeyWithIV(key, key.size(), iv);
-
-    std::string cipher;
-    StringSource ss(s, true,
-                    new AuthenticatedEncryptionFilter(e,
-                                                      new StringSink(cipher)
-                    ) // AuthenticatedEncryptionFilter
-    ); // StringSource
-
-    return cipher;
-}
-
-std::string UserAuthAPI::decrypt(const std::string &cipher, const std::string &iv_str) const {
-    using namespace CryptoPP;
-
-    SecByteBlock key(AES::DEFAULT_KEYLENGTH);
-    SecByteBlock iv(AES::BLOCKSIZE);
-
-    key.Assign((unsigned char *) enc_dec_key.c_str(), enc_dec_key.size());
-    iv.Assign((unsigned char *) iv_str.c_str(), iv_str.size());
-
-    std::string recovered;
-    EAX<AES>::Decryption d;
-    d.SetKeyWithIV(key, key.size(), iv);
-    StringSource ss(cipher, true,
-                    new AuthenticatedDecryptionFilter(d,
-                                                      new StringSink(recovered)
-                    ) // AuthenticatedDecryptionFilter
-    ); // StringSource
-
-    return recovered;
 }

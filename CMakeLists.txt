@@ -30,7 +30,7 @@ file(COPY ${ODB} DESTINATION ${CMAKE_BINARY_DIR}/odb_gen)
 add_executable(${PROJECT_NAME}
         ${INCLUDE}
         ${SRC}
-        ${ODB})
+        ${ODB} src/Crypto.cpp include/Crypto.h)
 
 target_link_libraries(${PROJECT_NAME} ${ODB_LIBRARIES}
         mps_utils my_utils

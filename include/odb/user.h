@@ -13,13 +13,12 @@
 
 //  TODO: add device language
 #pragma db object
-
 class user {
     user() {}
 
     friend class odb::access;
 
-#pragma db id auto
+    #pragma db id auto
     unsigned long id_;
 
     unsigned long timestamp_;
@@ -34,6 +33,8 @@ class user {
 
     std::string tel_nr_;
 
+    unsigned int flags_;
+
     std::string iv_;
 
     /// "password"
@@ -42,7 +43,7 @@ class user {
     /// in seconds from epoch
     unsigned long token_expires_;
 
-    bool suspicious_;
+    unsigned short trust_;
 
     /// 0 - not banned, 1 - banned indefinitely, ban_expires>1 - banned until ban_expires in seconds
     unsigned long ban_expires_;
@@ -54,10 +55,11 @@ public:
          const std::string &crypto_address,
          const std::string &email,
          const std::string &tel_nr,
+         unsigned int flags,
          const std::string &iv,
          const std::string &token,
          unsigned long token_expires,
-         bool suspicious = false,
+         uint16_t suspicious = false,
          unsigned long ban_expires = 0) :
             timestamp_(timestamp),
             type_(type),
@@ -65,10 +67,11 @@ public:
             crypto_address_(crypto_address),
             email_(email),
             tel_nr_(tel_nr),
+            flags_(flags),
             iv_(iv),
             token_(token),
             token_expires_(token_expires),
-            suspicious_(suspicious),
+            trust_(suspicious),
             ban_expires_(ban_expires) {};
 
     user(unsigned long timestamp,
@@ -76,14 +79,14 @@ public:
          const std::string &pseudo_id,
          const std::string &token,
          unsigned long token_expires,
-         bool suspicious = false,
+         unsigned short trust = 100,
          unsigned long ban_expires = 0) :
             timestamp_(timestamp),
             type_(type),
             pseudo_id_(pseudo_id),
             token_(token),
             token_expires_(token_expires),
-            suspicious_(suspicious),
+            trust_(trust),
             ban_expires_(ban_expires) {};
 
     unsigned long
@@ -107,6 +110,9 @@ public:
     const std::string &
     tel_nr() const { return tel_nr_; }
 
+    unsigned int
+    flags() { return flags_; }
+
     const std::string &
     iv() const { return iv_; }
 
@@ -116,8 +122,8 @@ public:
     unsigned long
     token_expires() const { return token_expires_; }
 
-    bool
-    suspicious() const { return suspicious_; }
+    unsigned short
+    trust() const { return trust_; }
 
     unsigned long
     ban_expires() const { return ban_expires_; }
@@ -138,6 +144,9 @@ public:
     tel_nr(const std::string &tel_nr) { tel_nr_ = tel_nr; }
 
     void
+    flags(unsigned int flags) { flags_ = flags; }
+
+    void
     iv(const std::string &iv) { iv_ = iv; }
 
     void
@@ -147,7 +156,7 @@ public:
     token_expires(unsigned long time) { token_expires_ = time; }
 
     void
-    suspicious(bool suspicious) { suspicious_ = suspicious; }
+    trust(bool suspicious) { trust_ = suspicious; }
 
     void
     ban_expires(unsigned long time) { ban_expires_ = time; }

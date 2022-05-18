@@ -12,6 +12,10 @@
 
 #include <my_utils/StringUtils.h>
 
+#include "ip.h"
+#include "user.h"
+
+#include "Crypto.h"
 #include "ResponseError.h"
 #include "IPHubAPI.h"
 
@@ -37,9 +41,12 @@ class UserAuthAPI {
     std::unique_ptr<odb::database> db;
 
 public:
-    enum user_type {
-        FAUCET,
-        OFFERWALL
+    enum flags {
+        FAUCET = 1 << 0,
+        OFFERWALL = 1 << 1,
+        EMAIL_VER = 1 << 2,
+        TEL_NR_VER = 1 << 3,
+
     };
 
     UserAuthAPI(const Json::Value &params, const std::string &iphub_api_key, std::string encryption_key);
@@ -52,7 +59,7 @@ public:
                        const std::string &ip_address,
                        const std::string &hash,
                        Args...args) const {
-        if (sha256Hash(mutl::concatenate(args...)) == hash)
+        if (crypto::sha256Hash(mutl::concatenate(args...)) == hash)
             return true;
 
         uint64_t timestamp = mutl::time::now<mutl::time::sec>();
@@ -72,7 +79,7 @@ public:
                       uint32_t id,
                       const std::string &token,
                       const std::string &ip_address,
-                      user_type type) const;
+                      flags type) const;
 
     void sign_in(httplib::Response &res,
                  const std::string &android_id,
@@ -85,9 +92,9 @@ public:
                const std::string &token,
                const std::string &ip_address) const;
 
-    void upgrade(httplib::Response &res,
+    /*void upgrade(httplib::Response &res,
                  uint64_t timestamp,
-                 const std::string &ip_address) const;
+                 const std::string &ip_address) const;*/
 
 private:
     [[nodiscard]]
@@ -97,7 +104,8 @@ private:
 
     void ban_device(const std::string &android_id, uint64_t timestamp, uint64_t for_how_long) const;
 
-    [[nodiscard]] uint64_t ban_ip(const std::string &ip_address, uint64_t timestamp, uint64_t for_how_long) const;
+    [[nodiscard]]
+    uint64_t ban_ip(const std::string &ip_address, uint64_t timestamp, uint64_t for_how_long) const;
 
     void ban_user(uint64_t id, uint64_t timestamp, uint64_t for_how_long) const;
 
@@ -118,12 +126,4 @@ private:
 
     [[nodiscard]]
     std::string get_country_iso_code(const std::string &ip_address) const;
-
-    static std::string guid();
-
-    static std::string sha256Hash(const std::string &s);
-
-    [[nodiscard]] std::string encrypt(const std::string &s, std::string &iv_out) const;
-
-    [[nodiscard]] std::string decrypt(const std::string &cipher, const std::string &iv_str) const;
 };
