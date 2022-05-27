@@ -35,9 +35,10 @@ void APIGateway::run() {
 #endif
 
     std::string cert_dir = mps::SvrDir::usr();
-    std::string cert_path = cert_dir + "root_ca.pem";
-    std::string cert_key_path = cert_dir + "root_ca.key";
+    std::string cert_path = cert_dir + "cert.pem";
+    std::string cert_key_path = cert_dir + "key.pem";
     static httplib::SSLServer api(cert_path.c_str(), cert_key_path.c_str());
+//    static httplib::Server api;
     if (!api.is_valid()) {
         Log::e(TAG, "listener failed to initialize ssl server");
         throw std::invalid_argument("wrong or nonexistent certs were given\n" + cert_path + "\n" + cert_key_path);
