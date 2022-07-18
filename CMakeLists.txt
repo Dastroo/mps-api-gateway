@@ -6,48 +6,28 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -pthread -Wall -Wno-unknown-pragmas")
 set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -pthread")
 
+enable_testing()
+add_subdirectory(unit_tests)
+
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
-
-find_package(ODB REQUIRED COMPONENTS pgsql)
-
-include(${ODB_USE_FILE})
 
 file(GLOB INCLUDE CONFIGURE_DEPENDS ${PROJECT_SOURCE_DIR}/include/*.h)
 file(GLOB SRC CONFIGURE_DEPENDS ${PROJECT_SOURCE_DIR}/src/*.cpp)
-file(GLOB ODB CONFIGURE_DEPENDS ${PROJECT_SOURCE_DIR}/include/odb/*.h)
-
-odb_compile(SRC
-        FILES ${ODB}
-        DB pgsql
-        GENERATE_QUERY GENERATE_SESSION GENERATE_SCHEMA
-        DEFAULT_POINTER std::shared_ptr
-        STANDARD c++17)
-
-# copy all odb headers to odb_gen
-# because otherwise the generated _odb.h files cant find the original header
-file(COPY ${ODB} DESTINATION ${CMAKE_BINARY_DIR}/odb_gen)
 
 add_executable(${PROJECT_NAME}
         ${INCLUDE}
-        ${SRC}
-        ${ODB} src/Crypto.cpp include/Crypto.h)
+        ${SRC})
 
-target_link_libraries(${PROJECT_NAME} ${ODB_LIBRARIES}
+find_package(nlohmann_json 3.2.0 REQUIRED)
+find_package(rpclib REQUIRED)
+
+target_link_libraries(${PROJECT_NAME}
+        ${RPCLIB_LIBS}
         mps_utils my_utils
-        jsoncpp
+        nlohmann_json::nlohmann_json
         log_helper
         cryptopp crypto
-        ssl
-        curlpp curl) # TODO: add libraries here
-
-target_include_directories(${PROJECT_NAME}
-        PRIVATE
-        ${ODB_INCLUDE_DIRS}
-        ${ODB_COMPILE_OUTPUT_DIR})
-
-add_custom_command(TARGET ${PROJECT_NAME}
-        POST_BUILD
-        COMMAND cp ${CMAKE_BINARY_DIR}/odb_gen/*.sql ${PROJECT_SOURCE_DIR}/sql)
+        ssl) # TODO: add libraries here
 
 if (CMAKE_BUILD_TYPE MATCHES "Debug")
     add_definitions(-DBUILD_DEBUG)

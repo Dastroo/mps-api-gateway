@@ -4,15 +4,12 @@
 
 #pragma once
 
-#include <string>
+#include <httplib.h>
 
-class APIGateway {
-    inline static const char* TAG = "APIGateway";
+namespace APIGateway {
 
-public:
-    APIGateway()=default;
+    void init();
 
-    static void run();
-};
+    void run();
 
-
+}// namespace APIGateway

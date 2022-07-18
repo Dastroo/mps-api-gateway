@@ -1,5 +1,5 @@
 [Unit]
-Description=api gateway for multipurpose server
+Description=api gateway for multipurpose unknown
 After=network.target
 
 [Service]
